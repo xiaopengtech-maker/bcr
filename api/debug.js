@@ -17,27 +17,60 @@ module.exports = async function handler(req, res) {
 
   // ── 1. Login ───────────────────────────────────────────
   try {
+    // Thử với timeout 10s
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 10000);
+
     const r = await fetch(loginUrl, {
       redirect: 'follow',
-      headers: { 'User-Agent': UA, 'Accept': '*/*', 'Accept-Language': 'vi-VN,vi;q=0.9' },
+      signal: controller.signal,
+      headers: {
+        'User-Agent': UA,
+        'Accept': 'text/html,application/xhtml+xml,application/json,*/*',
+        'Accept-Language': 'vi-VN,vi;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+      },
     });
+    clearTimeout(timer);
+
+    // Base từ finalUrl sau redirect
+    if (r.url && r.url.startsWith('http')) {
+      try { base = new URL(r.url).origin; } catch {}
+    }
+
     const sc = r.headers.get('set-cookie') || '';
     cookies = sc.split(/,(?=[^ ])/).map(c => c.split(';')[0].trim()).filter(Boolean).join('; ');
     const body = await r.text();
     let bodyJson = null;
     try { bodyJson = JSON.parse(body); } catch {}
 
+    // Đọc tất cả headers để debug
+    const allHeaders = {};
+    r.headers.forEach((v, k) => { allHeaders[k] = v; });
+
     report.loginResult = {
       status: r.status,
       finalUrl: r.url,
-      cookiesFound: cookies || '없음',
+      baseDetected: base,
+      cookiesFound: cookies || 'KHÔNG CÓ COOKIE',
       contentType: r.headers.get('content-type'),
+      allHeaders,
       bodyLength: body.length,
       bodyFirst300: body.substring(0, 300),
       bodyJson,
     };
   } catch(e) {
-    report.loginResult = { error: e.message };
+    report.loginResult = {
+      error: e.message,
+      errorType: e.name,
+      detail: e.cause ? String(e.cause) : null,
+      hint: e.name === 'AbortError' ? 'TIMEOUT — server không phản hồi trong 10s' :
+            e.message.includes('ENOTFOUND') ? 'DNS không phân giải được domain' :
+            e.message.includes('ECONNREFUSED') ? 'Kết nối bị từ chối' :
+            e.message.includes('certificate') ? 'Lỗi SSL certificate' :
+            'Fetch thất bại — có thể Vercel bị chặn bởi platform',
+    };
   }
 
   // ── 2. Fetch lobby HTML → tìm API/WS endpoint ─────────
