@@ -556,35 +556,47 @@ function startCountdown(sec) {
   }, 1000);
 }
 
-// ── API call ───────────────────────────
+// ── API SCAN ──────────────────────────
 async function runScan() {
   const cfg = getCfg();
   saveCfg();
+
+  if (!cfg.loginUrl) {
+    log('⚠ Chưa có link login!', 'warn');
+    return;
+  }
+
   setStatus('scanning');
-  log('Bắt đầu quét...', 'info');
+  log('Đang quét các bàn...', 'info');
 
   try {
+    // Gửi loginUrl qua header X-Login-Url để tránh bị double-encode khi truyền qua query
     const params = new URLSearchParams({
-      token: cfg.token,
-      chatId: cfg.chatId,
+      token:    cfg.token,
+      chatId:   cfg.chatId,
       cooldown: cfg.cooldown,
     });
-    const res = await fetch(`/api/scan?${params}`);
+
+    const res = await fetch(`/api/scan?${params}`, {
+      method: 'GET',
+      headers: { 'X-Login-Url': cfg.loginUrl },
+    });
+
     const data = await res.json();
 
     s.scans++;
     s.tables = Math.max(s.tables, data.tablesScanned || 0);
-    
-    const alerts = data.alerts || [];
-    const new11 = alerts.filter(a => a.roadType === '1-1').length;
-    const newBet = alerts.filter(a => a.roadType === 'bet').length;
-    s.r11 += new11;
+
+    const hot    = data.hotTables || [];
+    const new11  = hot.filter(a => a.roadType === '1-1').length;
+    const newBet = hot.filter(a => a.roadType === 'bet').length;
+    s.r11  += new11;
     s.rBet += newBet;
     updateStats();
 
-    if (alerts.length > 0) {
-      log(`✅ Tìm thấy ${alerts.length} cầu hot! (1-1: ${new11}, Bệt: ${newBet})`, 'ok');
-      alerts.forEach(a => addAlertItem(a));
+    if (hot.length > 0) {
+      log(`✅ ${hot.length} cầu hot! (1-1: ${new11} | Bệt: ${newBet}) — Gửi TG: ${data.alertsSent || 0}`, 'ok');
+      hot.forEach(a => addAlert(a));
     } else {
       log(`Đã quét ${data.tablesScanned || 0} bàn — Chưa có cầu hot`, 'dim');
     }
@@ -592,12 +604,15 @@ async function runScan() {
     if (data.errors?.length) {
       data.errors.forEach(e => log(`⚠ ${e}`, 'err'));
     }
+    if (data.endpoint) {
+      log(`📡 Endpoint hoạt động: ${data.endpoint}`, 'dim');
+    }
 
-  } catch(e) {
-    log(`Lỗi: ${e.message}`, 'err');
+  } catch (e) {
+    log(`Lỗi kết nối: ${e.message}`, 'err');
   }
 
-  setStatus(intervalId ? 'running' : '');
+  if (isRunning) setStatus('running');
 }
 
 // ── Bot control ────────────────────────
