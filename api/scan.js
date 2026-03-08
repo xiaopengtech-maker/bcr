@@ -1,15 +1,13 @@
 /**
- * /api/scan.js — Baccarat Road Monitor v3.1
- * ✅ Không dùng Puppeteer — pure fetch
- * ✅ loginUrl truyền qua header X-Login-Url (tránh double-encode)
- * ✅ Chạy được Vercel, Railway, Render, VPS
+ * /api/scan.js — Baccarat Road Monitor v3.2
+ * Fix: lấy base URL từ finalUrl sau redirect (không dùng loginUrl gốc)
  */
 
 const DEFAULT_LOGIN_URL = 'https://bpweb.grteud.com/api/player/MexAWS081/login?user=f572868agent190563002&key=2YUbKDU3UtQoIKq%2FO6oOLOCYQLfXNdQj1p023AxRBEduc7zOQXHKsOPF%2BkMellAC&language=vn&showSymbol=true&balance=0.000&dm=1&cafeid=wg2868&reverseBPColor=false&allowHedgeBetting=false&isInternal=0&extension2=f57&extension3=sc88.com&loginIp=42.114.185.31&sgt=1&userName=2868agent190563002';
 
 const TG = 'https://api.telegram.org/bot';
 
-// ─── Cooldown ──────────────────────────────────────────────
+// ─── Cooldown ─────────────────────────────────────────────
 const cooldownMap = new Map();
 function isCooldown(key, sec) {
   const t = cooldownMap.get(key);
@@ -17,83 +15,93 @@ function isCooldown(key, sec) {
 }
 function setCooldown(key) { cooldownMap.set(key, Date.now()); }
 
-// ─── Lấy base origin an toàn ──────────────────────────────
-function getBase(url) {
-  try { return new URL(url).origin; }
-  catch { return 'https://bpweb.grteud.com'; }
-}
-
-// ─── Login ────────────────────────────────────────────────
+// ─── Login → trả về cookies + base từ finalUrl ────────────
 async function doLogin(loginUrl) {
-  const base = getBase(loginUrl);
-  const ua = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
+
+  // Thử lấy base từ loginUrl trước
+  let baseFromLogin = 'https://bpweb.grteud.com';
+  try { baseFromLogin = new URL(loginUrl).origin; } catch {}
 
   let cookies = '';
+  let finalBase = baseFromLogin;
+  let loginData = null;
 
   try {
-    // follow redirect tự động, thu cookie từ mỗi bước
     const r = await fetch(loginUrl, {
       method: 'GET',
+      redirect: 'follow',
       headers: {
-        'User-Agent': ua,
+        'User-Agent': UA,
         'Accept': 'text/html,application/xhtml+xml,application/json,*/*',
-        'Accept-Language': 'vi-VN,vi;q=0.9,en;q=0.8',
-        'Referer': base + '/',
+        'Accept-Language': 'vi-VN,vi;q=0.9',
+        'Referer': baseFromLogin + '/',
         'Cache-Control': 'no-cache',
       },
-      redirect: 'follow',   // follow redirect bình thường
     });
 
-    // Lấy cookie từ final response (Vercel Node không expose redirect cookies)
-    const sc = r.headers.get('set-cookie');
-    if (sc) {
-      // parse multi-cookie header
-      cookies = sc.split(/,(?=[^ ])/).map(c => c.split(';')[0].trim()).join('; ');
+    // ★ KEY FIX: lấy base từ r.url (URL sau khi follow redirect xong)
+    // r.url sẽ là URL thực tế, ví dụ https://bpweb.jlyss.com/player/webMain.jsp
+    if (r.url && r.url.startsWith('http')) {
+      try { finalBase = new URL(r.url).origin; } catch {}
     }
 
-    // Nếu response là JSON chứa token/sessionId thì lưu luôn
+    // Thu cookie
+    const sc = r.headers.get('set-cookie') || '';
+    if (sc) {
+      cookies = sc.split(/,(?=[^ ])/)
+        .map(c => c.split(';')[0].trim())
+        .filter(Boolean)
+        .join('; ');
+    }
+
+    // Parse JSON nếu có
     const ct = r.headers.get('content-type') || '';
     if (ct.includes('json')) {
       try {
-        const json = await r.json();
-        // Một số platform trả về token trong body
-        const token = json.token || json.sessionId || json.sid || json.jsessionid;
-        if (token) cookies = cookies ? `${cookies}; token=${token}` : `token=${token}`;
-        // Trả về cả json để dùng sau
-        return { cookies, base, loginData: json };
+        const text = await r.text();
+        loginData = JSON.parse(text);
+        const tok = loginData.token || loginData.sessionId || loginData.sid;
+        if (tok) cookies = cookies ? `${cookies}; token=${tok}` : `token=${tok}`;
       } catch {}
     }
+
   } catch (e) {
-    // ignore, trả cookies rỗng để vẫn thử fetchTables
+    // login thất bại, vẫn tiếp tục với base mặc định
   }
 
-  return { cookies, base, loginData: null };
+  return { cookies, base: finalBase, loginData };
 }
 
-// ─── Fetch danh sách bàn ──────────────────────────────────
+// ─── Fetch danh sách bàn từ finalBase ─────────────────────
 async function fetchTables(cookies, base, loginData) {
+  const UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/122.0.0.0 Safari/537.36';
   const headers = {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'User-Agent': UA,
     'Accept': 'application/json, text/plain, */*',
     'Accept-Language': 'vi-VN,vi;q=0.9',
-    'Referer': base + '/player/webMain.jsp?dm=1&title=1',
+    'Referer': `${base}/player/webMain.jsp?dm=1&title=1`,
     'X-Requested-With': 'XMLHttpRequest',
     'Cache-Control': 'no-cache',
   };
   if (cookies) headers['Cookie'] = cookies;
 
-  // Nếu loginData có token dùng làm Bearer
   const bearerToken = loginData?.token || loginData?.accessToken;
   if (bearerToken) headers['Authorization'] = `Bearer ${bearerToken}`;
 
+  // Dùng base động (jlyss.com hoặc grteud.com tùy redirect)
   const endpoints = [
     `${base}/api/player/MexAWS081/getTableList?dm=1&gameType=1`,
     `${base}/api/player/MexAWS081/getTableList?dm=1`,
     `${base}/api/player/MexAWS081/lobby?dm=1`,
     `${base}/api/player/MexAWS081/gameList?dm=1`,
-    `${base}/api/MexAWS081/getTableList?dm=1`,
-    `${base}/webapi/getTableList?dm=1`,
     `${base}/api/player/MexAWS081/baccaratList?dm=1`,
+    `${base}/api/player/MexAWS081/tableList?dm=1`,
+    `${base}/api/player/MexAWS081/getAllTable?dm=1`,
+    `${base}/api/MexAWS081/getTableList?dm=1`,
+    `${base}/api/MexAWS081/lobby?dm=1`,
+    `${base}/webapi/getTableList?dm=1`,
+    `${base}/api/player/MexAWS081/getGameList?dm=1`,
   ];
 
   const tried = [];
@@ -117,7 +125,7 @@ async function fetchTables(cookies, base, loginData) {
 function extractList(json) {
   if (!json) return [];
   if (Array.isArray(json)) return json;
-  for (const k of ['data','tables','list','result','gameList','tableList','items']) {
+  for (const k of ['data','tables','list','result','gameList','tableList','items','rows']) {
     if (Array.isArray(json[k]) && json[k].length > 0) return json[k];
   }
   // Đệ quy 1 cấp
@@ -130,7 +138,8 @@ function extractList(json) {
 // ─── Parse bàn ────────────────────────────────────────────
 function parseTable(t) {
   const name = String(t.tableName || t.name || t.tableCode || t.code || t.tableId || t.id || 'Unknown');
-  const histKeys = ['history','results','roadMap','shoeHistory','gameResults','gameHistory','bead','beadRoad','bigRoad','records','gameRecord'];
+  const histKeys = ['history','results','roadMap','shoeHistory','gameResults','gameHistory',
+                    'bead','beadRoad','bigRoad','records','gameRecord','resultList'];
   let history = [];
   for (const k of histKeys) {
     if (Array.isArray(t[k]) && t[k].length > 0) { history = t[k]; break; }
@@ -183,7 +192,7 @@ function analyzeRoad(raw) {
   return null;
 }
 
-// ─── Format hiển thị ──────────────────────────────────────
+// ─── Format ───────────────────────────────────────────────
 function fmtResults(history, max = 20) {
   return history.slice(-max).map(r => {
     if (r === 1 || r === '1' || r === 'B' || r === 'b') return '🔴';
@@ -211,12 +220,7 @@ module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type,X-Login-Url');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  // loginUrl: ưu tiên header (an toàn hơn query vì không bị encode), rồi query, rồi env
-  const loginUrl    = req.headers['x-login-url']
-                   || req.query.loginUrl
-                   || process.env.LOGIN_URL
-                   || DEFAULT_LOGIN_URL;
-
+  const loginUrl    = req.headers['x-login-url'] || req.query.loginUrl || process.env.LOGIN_URL || DEFAULT_LOGIN_URL;
   const tgToken     = req.query.token   || process.env.TELEGRAM_BOT_TOKEN || '';
   const tgChatId    = req.query.chatId  || process.env.TELEGRAM_CHAT_ID   || '';
   const cooldownSec = parseInt(req.query.cooldown || process.env.COOLDOWN_SEC || '120');
@@ -226,26 +230,28 @@ module.exports = async function handler(req, res) {
     tablesScanned: 0,
     hotTables: [],
     alertsSent: 0,
+    base: null,
     endpoint: null,
     triedEndpoints: [],
     errors: [],
   };
 
   try {
-    // 1. Login
+    // 1. Login — lấy finalBase (domain thật sau redirect)
     const { cookies, base, loginData } = await doLogin(loginUrl);
+    report.base = base; // log ra để debug
 
-    // 2. Fetch bàn
+    // 2. Fetch bàn dùng base đúng
     const { list, endpoint, tried } = await fetchTables(cookies, base, loginData);
-    report.endpoint        = endpoint;
-    report.triedEndpoints  = tried;
-    report.tablesScanned   = list.length;
+    report.endpoint       = endpoint;
+    report.triedEndpoints = tried;
+    report.tablesScanned  = list.length;
 
     if (list.length === 0) {
-      report.errors.push('Không lấy được danh sách bàn. Đã thử: ' + tried.length + ' endpoint. Có thể session hết hạn.');
+      report.errors.push(`Không lấy được danh sách bàn. Base: ${base}. Đã thử: ${tried.length} endpoint.`);
     }
 
-    // 3. Phân tích
+    // 3. Phân tích cầu
     const hotList = [];
     for (const raw of list) {
       const { name, history } = parseTable(raw);
@@ -271,20 +277,18 @@ module.exports = async function handler(req, res) {
       const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
       for (const t of toAlert) {
         const ok = await sendTG(tgToken, tgChatId,
-          `${t.emoji} <b>${t.label}</b>\n📍 Bàn: <b>${t.tableName}</b>\n🎴 ${t.results}\n🕐 ${now}`
-        );
+          `${t.emoji} <b>${t.label}</b>\n📍 Bàn: <b>${t.tableName}</b>\n🎴 ${t.results}\n🕐 ${now}`);
         if (ok) { setCooldown(t.tableName); report.alertsSent++; }
       }
       if (toAlert.length > 1) {
         await sendTG(tgToken, tgChatId,
-          `📊 <b>TỔNG KẾT — ${now}</b>\n🔍 Đã quét: <b>${report.tablesScanned}</b> bàn\n⚡ Cầu hot: <b>${toAlert.length}</b>\n\n` +
-          toAlert.map(t => `${t.emoji} ${t.tableName} — ${t.label}`).join('\n')
-        );
+          `📊 <b>TỔNG KẾT — ${now}</b>\n🔍 Quét: <b>${report.tablesScanned}</b> bàn\n⚡ Hot: <b>${toAlert.length}</b>\n\n` +
+          toAlert.map(t => `${t.emoji} ${t.tableName} — ${t.label}`).join('\n'));
       }
     }
 
   } catch (e) {
-    report.errors.push(e.message + (e.stack ? ' | ' + e.stack.split('\n')[1]?.trim() : ''));
+    report.errors.push(e.message + ' | ' + (e.stack?.split('\n')[1]?.trim() || ''));
   }
 
   return res.status(200).json(report);

@@ -397,6 +397,7 @@
       <button class="btn btn-go" id="btnStart" onclick="startBot()">▶ Bắt đầu</button>
       <button class="btn btn-stop" id="btnStop" onclick="stopBot()" disabled>⏹ Dừng</button>
       <button class="btn btn-now" onclick="runScan()">🔄 Quét ngay</button>
+      <button class="btn btn-now" onclick="runDebug()" style="border-color:#a855f7;color:#a855f7;">🔬 Debug API</button>
       <div class="countdown" id="cdText"></div>
     </div>
   </div>
@@ -717,6 +718,81 @@ document.addEventListener('DOMContentLoaded', () => {
   const el = document.getElementById('cfgLoginUrl');
   if (el) el.addEventListener('input', function() { updateUrlStatus(this.value.trim()); });
 });
+
+
+// ── Debug: kiểm tra login + endpoints ─────────────────────
+async function runDebug() {
+  const cfg = getCfg();
+  if (!cfg.loginUrl) { log('⚠ Chưa có link login!', 'warn'); return; }
+
+  log('🔬 Đang chạy debug...', 'info');
+
+  // Hiện modal debug
+  const overlay = document.createElement('div');
+  overlay.id = 'debugOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);z-index:999;overflow:auto;padding:20px;backdrop-filter:blur(4px);';
+  overlay.innerHTML = `
+    <div style="max-width:900px;margin:0 auto;background:#0e1520;border:1px solid #1e2d40;border-radius:14px;padding:24px;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px;">
+        <span style="font-family:Teko,sans-serif;font-size:1.3rem;color:#a855f7;letter-spacing:2px;">🔬 DEBUG — PHÂN TÍCH API</span>
+        <button onclick="document.getElementById('debugOverlay').remove()"
+          style="background:transparent;border:1px solid #1e2d40;color:#4a6080;padding:4px 12px;border-radius:6px;cursor:pointer;">✕ Đóng</button>
+      </div>
+      <div id="debugContent" style="font-family:monospace;font-size:0.75rem;line-height:1.8;color:#c8d8e8;">
+        <span style="color:#60a5fa">Đang gọi API debug, vui lòng chờ...</span>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  try {
+    const res = await fetch('/api/debug', {
+      headers: { 'X-Login-Url': cfg.loginUrl }
+    });
+    const data = await res.json();
+    const el = document.getElementById('debugContent');
+
+    let html = '';
+
+    // Login info
+    const lr = data.loginResponse || {};
+    html += `<div style="margin-bottom:16px;padding:12px;background:#080c10;border-radius:8px;border:1px solid #1e2d40;">`;
+    html += `<div style="color:#f0b429;font-weight:bold;margin-bottom:8px;">📡 KẾT QUẢ ĐĂNG NHẬP</div>`;
+    html += `<div>Status: <b style="color:${lr.status===200?'#22c55e':'#ef4444'}">${lr.status}</b></div>`;
+    html += `<div>URL cuối: <span style="color:#93c5fd">${lr.finalUrl||'—'}</span></div>`;
+    html += `<div>Content-Type: ${lr.contentType||'—'}</div>`;
+    html += `<div>Cookie: <span style="color:${lr.cookies&&lr.cookies!='(없음)'?'#22c55e':'#ef4444'}">${lr.cookies||'không có'}</span></div>`;
+    if (lr.bodyPreview) {
+      html += `<div style="margin-top:8px;color:#4a6080">Body (500 ký tự đầu):</div>`;
+      html += `<pre style="color:#e2e8f0;white-space:pre-wrap;word-break:break-all;margin:4px 0;font-size:0.7rem;">${escHtml(lr.bodyPreview)}</pre>`;
+    }
+    html += '</div>';
+
+    // Endpoint tests
+    html += `<div style="color:#f0b429;font-weight:bold;margin-bottom:8px;">🔌 KẾT QUẢ THỬ ENDPOINT</div>`;
+    for (const ep of (data.endpointTests||[])) {
+      const ok = ep.isJson && ep.status === 200;
+      const color = ok ? '#22c55e' : ep.status===200 ? '#f0b429' : '#4a6080';
+      html += `<div style="padding:8px 10px;background:#080c10;border-radius:6px;margin-bottom:6px;border-left:3px solid ${color}">`;
+      html += `<div style="color:${color}">${ok?'✅':'❌'} ${ep.url.replace('https://bpweb.grteud.com','')}</div>`;
+      html += `<div style="font-size:0.68rem;color:#4a6080">Status: ${ep.status||'ERR'} | JSON: ${ep.isJson?'✅':'❌'}</div>`;
+      if (ep.preview && ok) {
+        html += `<pre style="color:#94a3b8;white-space:pre-wrap;word-break:break-all;font-size:0.65rem;margin-top:4px;">${escHtml(ep.preview)}</pre>`;
+      }
+      if (ep.error) html += `<div style="color:#ef4444;font-size:0.7rem">${ep.error}</div>`;
+      html += '</div>';
+    }
+
+    el.innerHTML = html;
+    log('🔬 Debug xong — xem cửa sổ popup', 'ok');
+  } catch(e) {
+    document.getElementById('debugContent').innerHTML = `<span style="color:#ef4444">Lỗi: ${e.message}</span>`;
+    log('Lỗi debug: ' + e.message, 'err');
+  }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 
 loadCfg();
 </script>
