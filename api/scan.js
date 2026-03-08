@@ -1,299 +1,295 @@
 /**
- * /api/scan.js
- * 
- * Dùng Puppeteer để:
- * 1. Đăng nhập vào platform
- * 2. Lấy danh sách bàn
- * 3. Screenshot vùng badge màu vàng (tên cầu) của mỗi bàn
- * 4. Dùng Claude Vision để đọc text cầu
- * 5. Nếu phát hiện cầu 1-1 hoặc cầu bệt → gửi Telegram
+ * /api/scan.js — Baccarat Road Monitor v3
+ * ✅ Không dùng Puppeteer/Chromium
+ * ✅ Chạy được trên Vercel, Railway, Render, VPS
+ * ✅ Gọi thẳng API platform bằng fetch
  */
-
-const puppeteer = require('puppeteer-core');
-const chromium = require('@sparticuz/chromium');
 
 const LOGIN_URL = `https://bpweb.grteud.com/api/player/MexAWS081/login?user=f572868agent190563002&key=2YUbKDU3UtQoIKq%2FO6oOLOCYQLfXNdQj1p023AxRBEduc7zOQXHKsOPF%2BkMellAC&language=vn&showSymbol=true&balance=0.000&dm=1&cafeid=wg2868&reverseBPColor=false&allowHedgeBetting=false&isInternal=0&extension2=f57&extension3=sc88.com&loginIp=42.114.185.31&sgt=1&userName=2868agent190563002`;
 
-const LOBBY_URL = `https://bpweb.grteud.com/player/webMain.jsp?dm=1&title=1`;
+const BASE = 'https://bpweb.grteud.com';
+const TG   = 'https://api.telegram.org/bot';
 
-const TELEGRAM_API = `https://api.telegram.org/bot`;
-
-// In-memory cooldown (per serverless instance)
+// ─── In-memory cooldown ────────────────────────────────────
 const cooldownMap = new Map();
-
-function isCooldown(key, sec = 120) {
+function isCooldown(key, sec) {
   const t = cooldownMap.get(key);
-  if (!t) return false;
-  return (Date.now() - t) / 1000 < sec;
+  return t && (Date.now() - t) / 1000 < sec;
 }
 function setCooldown(key) { cooldownMap.set(key, Date.now()); }
 
-// ─── Telegram ──────────────────────────────────────────────
-async function sendTelegram(token, chatId, text) {
-  const r = await fetch(`${TELEGRAM_API}${token}/sendMessage`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
-  });
-  return r.json();
-}
+// ─── Login → lấy cookie session ───────────────────────────
+async function doLogin() {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'application/json, text/html, */*',
+    'Accept-Language': 'vi-VN,vi;q=0.9',
+    'Referer': BASE + '/',
+  };
 
-async function sendPhoto(token, chatId, base64, caption) {
-  // Gửi ảnh dạng multipart
-  const blob = Buffer.from(base64, 'base64');
-  const form = new FormData();
-  form.append('chat_id', chatId);
-  form.append('caption', caption);
-  form.append('parse_mode', 'HTML');
-  form.append('photo', new Blob([blob], { type: 'image/png' }), 'table.png');
-  const r = await fetch(`${TELEGRAM_API}${token}/sendPhoto`, { method: 'POST', body: form });
-  return r.json();
-}
-
-// ─── Claude Vision - đọc text badge cầu ───────────────────
-async function readBadgeText(base64Image, anthropicKey) {
-  const r = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': anthropicKey,
-      'anthropic-version': '2023-06-01',
-    },
-    body: JSON.stringify({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 100,
-      messages: [{
-        role: 'user',
-        content: [
-          {
-            type: 'image',
-            source: { type: 'base64', media_type: 'image/png', data: base64Image }
-          },
-          {
-            type: 'text',
-            text: `Đây là badge cầu Baccarat. Hãy đọc chính xác text trong ô màu vàng/cam. 
-Chỉ trả lời đúng text đó, không giải thích thêm. 
-Ví dụ: "Cầu 1-1", "Cầu bệt", "Cầu bệt Cái", "Cầu nghiêng Cái", "Cầu đỉnh Con", v.v.
-Nếu không thấy badge vàng, trả lời: NONE`
-          }
-        ]
-      }]
-    })
-  });
-  const data = await r.json();
-  return data?.content?.[0]?.text?.trim() || 'NONE';
-}
-
-// ─── Phân loại cầu từ text ─────────────────────────────────
-function classifyRoad(text) {
-  if (!text || text === 'NONE') return null;
-  const t = text.toLowerCase();
+  // Bước 1: GET login URL → nhận redirect + set-cookie
+  const r1 = await fetch(LOGIN_URL, { headers, redirect: 'manual' });
   
-  if (t.includes('1-1') || t.includes('1 1') || t.includes('ping')) {
-    return { type: '1-1', label: text };
+  // Thu thập tất cả cookie từ response
+  let cookies = '';
+  const rawCookies = r1.headers.raw?.()?.['set-cookie'] || [];
+  if (rawCookies.length) {
+    cookies = rawCookies.map(c => c.split(';')[0]).join('; ');
+  } else {
+    // Node fetch fallback
+    const sc = r1.headers.get('set-cookie');
+    if (sc) cookies = sc.split(';')[0];
   }
-  if (t.includes('bệt')) {
-    return { type: 'bet', label: text };
+
+  // Nếu có redirect location thì follow
+  const location = r1.headers.get('location');
+  if (location) {
+    const r2 = await fetch(location.startsWith('http') ? location : BASE + location, {
+      headers: { ...headers, Cookie: cookies },
+      redirect: 'manual',
+    });
+    const sc2 = r2.headers.get('set-cookie');
+    if (sc2) {
+      const extra = sc2.split(';')[0];
+      cookies = cookies ? cookies + '; ' + extra : extra;
+    }
   }
-  return null; // cầu khác không cần alert
+
+  return cookies;
 }
 
-// ─── Main handler ──────────────────────────────────────────
+// ─── Lấy danh sách bàn + lịch sử cầu ─────────────────────
+async function fetchTables(cookies) {
+  const headers = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    'Accept': 'application/json',
+    'Referer': BASE + '/player/webMain.jsp',
+    'X-Requested-With': 'XMLHttpRequest',
+    'Cookie': cookies,
+  };
+
+  // Thử nhiều endpoint phổ biến của platform Sexy/AE Sexy
+  const endpoints = [
+    '/api/player/MexAWS081/getTableList?dm=1&gameType=1',
+    '/api/player/MexAWS081/lobby?dm=1',
+    '/api/player/MexAWS081/gameList?dm=1',
+    '/api/MexAWS081/getTableList?dm=1',
+    '/webapi/getTableList?dm=1&cafeid=wg2868',
+    '/api/player/MexAWS081/baccaratList?dm=1',
+  ];
+
+  for (const ep of endpoints) {
+    try {
+      const r = await fetch(BASE + ep, { headers });
+      if (!r.ok) continue;
+      const text = await r.text();
+      if (!text || text.trim()[0] !== '{' && text.trim()[0] !== '[') continue;
+      const json = JSON.parse(text);
+      const list = extractTableList(json);
+      if (list && list.length > 0) return { list, endpoint: ep };
+    } catch {}
+  }
+
+  return { list: [], endpoint: null };
+}
+
+// ─── Extract table list từ nhiều format JSON khác nhau ────
+function extractTableList(json) {
+  if (!json) return [];
+  if (Array.isArray(json)) return json;
+  for (const key of ['data', 'tables', 'list', 'result', 'gameList', 'tableList']) {
+    if (json[key] && Array.isArray(json[key])) return json[key];
+  }
+  return [];
+}
+
+// ─── Phân tích cầu từ lịch sử kết quả ─────────────────────
+// Kết quả: 1=Banker, 2=Player, 3=Tie (hoặc 'B','P','T')
+function analyzeRoad(raw) {
+  if (!raw || raw.length === 0) return null;
+
+  // Normalize về 'B', 'P', 'T'
+  const results = raw.map(r => {
+    if (r === 1 || r === '1' || (typeof r === 'string' && r.toUpperCase().startsWith('B'))) return 'B';
+    if (r === 2 || r === '2' || (typeof r === 'string' && r.toUpperCase().startsWith('P'))) return 'P';
+    return 'T';
+  });
+
+  // Lọc Tie để phân tích
+  const noTie = results.filter(r => r !== 'T');
+  if (noTie.length < 4) return null;
+
+  // ── Kiểm tra cầu bệt (streak >= 3) ──
+  const last = noTie[noTie.length - 1];
+  let streakCount = 0;
+  for (let i = noTie.length - 1; i >= 0; i--) {
+    if (noTie[i] === last) streakCount++;
+    else break;
+  }
+  if (streakCount >= 3) {
+    const side = last === 'B' ? 'Cái' : 'Con';
+    return {
+      type: 'bet',
+      label: `Cầu bệt ${side} ${streakCount} lần`,
+      count: streakCount,
+      side: last,
+      emoji: last === 'B' ? '🔴' : '🔵',
+    };
+  }
+
+  // ── Kiểm tra cầu 1-1 (ping-pong >= 4 lần xen kẽ) ──
+  let pingCount = 1;
+  for (let i = noTie.length - 1; i >= 1; i--) {
+    if (noTie[i] !== noTie[i - 1]) pingCount++;
+    else break;
+  }
+  if (pingCount >= 4) {
+    return {
+      type: '1-1',
+      label: `Cầu 1-1 (${pingCount} lần)`,
+      count: pingCount,
+      side: null,
+      emoji: '🔁',
+    };
+  }
+
+  return null;
+}
+
+// ─── Parse table object → tên + lịch sử ──────────────────
+function parseTable(t) {
+  const name =
+    t.tableName || t.name || t.tableCode || t.code ||
+    t.tableId   || t.id   || 'Unknown';
+
+  // Tìm mảng lịch sử trong các key phổ biến
+  const histKeys = ['history', 'results', 'roadMap', 'shoeHistory',
+                    'gameResults', 'gameHistory', 'bead', 'beadRoad',
+                    'bigRoad', 'records'];
+  let history = [];
+  for (const k of histKeys) {
+    if (t[k] && Array.isArray(t[k]) && t[k].length > 0) {
+      history = t[k];
+      break;
+    }
+  }
+
+  // Nếu lịch sử là mảng object, lấy trường winner/result
+  if (history.length > 0 && typeof history[0] === 'object') {
+    history = history.map(h =>
+      h.winner ?? h.result ?? h.outcome ?? h.w ?? h.gameResult ?? 0
+    );
+  }
+
+  return { name: String(name), history };
+}
+
+// ─── Telegram ─────────────────────────────────────────────
+async function sendTelegram(token, chatId, text) {
+  try {
+    await fetch(`${TG}${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' }),
+    });
+  } catch {}
+}
+
+// ─── Format kết quả hiển thị ──────────────────────────────
+function fmtResults(history, max = 20) {
+  return history.slice(-max).map(r => {
+    const v = r === 1 || r === '1' || r === 'B' || r === 'b' ? '🔴'
+            : r === 2 || r === '2' || r === 'P' || r === 'p' ? '🔵' : '🟡';
+    return v;
+  }).join('');
+}
+
+// ─── MAIN HANDLER ─────────────────────────────────────────
 module.exports = async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const token = req.query.token || process.env.TELEGRAM_BOT_TOKEN;
-  const chatId = req.query.chatId || process.env.TELEGRAM_CHAT_ID;
-  const anthropicKey = process.env.ANTHROPIC_API_KEY;
+  const tgToken    = req.query.token    || process.env.TELEGRAM_BOT_TOKEN || '';
+  const tgChatId   = req.query.chatId   || process.env.TELEGRAM_CHAT_ID   || '';
   const cooldownSec = parseInt(req.query.cooldown || process.env.COOLDOWN_SEC || '120');
 
   const report = {
     timestamp: new Date().toISOString(),
     tablesScanned: 0,
-    alerts: [],
+    hotTables: [],
+    alertsSent: 0,
+    endpoint: null,
     errors: [],
   };
 
-  let browser;
   try {
-    // 1. Launch Puppeteer
-    browser = await puppeteer.launch({
-      args: chromium.args,
-      defaultViewport: chromium.defaultViewport,
-      executablePath: await chromium.executablePath(),
-      headless: chromium.headless,
-    });
+    // 1. Đăng nhập
+    const cookies = await doLogin();
 
-    const page = await browser.newPage();
-    await page.setViewport({ width: 1440, height: 900 });
-    await page.setUserAgent('Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36');
+    // 2. Lấy danh sách bàn
+    const { list, endpoint } = await fetchTables(cookies);
+    report.endpoint   = endpoint;
+    report.tablesScanned = list.length;
 
-    // 2. Đăng nhập
-    await page.goto(LOGIN_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-    await page.waitForTimeout(2000);
-    
-    // 3. Vào lobby
-    await page.goto(LOBBY_URL, { waitUntil: 'networkidle2', timeout: 30000 });
-    await page.waitForTimeout(3000);
-
-    // 4. Tìm tất cả bàn baccarat
-    // Badge cầu thường có class chứa "road" hoặc style màu vàng (#f0c040, gold, yellow)
-    const tables = await page.evaluate(() => {
-      const result = [];
-      
-      // Tìm các container bàn
-      const allElements = document.querySelectorAll('[class*="table"], [class*="game"], [class*="baccarat"]');
-      
-      allElements.forEach((el, idx) => {
-        // Tìm badge màu vàng bên trong
-        const badges = el.querySelectorAll('[class*="road"], [class*="badge"], [class*="tag"], [class*="label"]');
-        const tableName = el.querySelector('[class*="name"], [class*="title"], h3, h4')?.textContent?.trim();
-        
-        badges.forEach(badge => {
-          const style = window.getComputedStyle(badge);
-          const bg = style.backgroundColor;
-          // Kiểm tra màu vàng/cam
-          if (bg && (bg.includes('255, 193') || bg.includes('240, 192') || bg.includes('255, 215') || bg.includes('243, 156'))) {
-            const rect = badge.getBoundingClientRect();
-            if (rect.width > 10 && rect.height > 10) {
-              result.push({
-                idx,
-                tableName: tableName || `Bàn ${idx}`,
-                badgeRect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-                text: badge.textContent?.trim(),
-              });
-            }
-          }
-        });
-      });
-      
-      return result;
-    });
-
-    // 5. Nếu không tìm được qua DOM, screenshot toàn bộ và tìm badge vàng
-    if (tables.length === 0) {
-      // Thử cách khác: tìm tất cả element có text "Cầu"
-      const cauElements = await page.evaluate(() => {
-        const result = [];
-        const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-        let node;
-        while (node = walker.nextNode()) {
-          if (node.textContent.includes('Cầu') || node.textContent.includes('cầu')) {
-            const el = node.parentElement;
-            const rect = el.getBoundingClientRect();
-            if (rect.width > 20 && rect.height > 10 && rect.width < 300) {
-              // Lấy thêm context: tên bàn ở gần đó
-              const container = el.closest('[class*="table"], [class*="game"], [class*="item"], [class*="card"]');
-              const nameEl = container?.querySelector('[class*="name"], [class*="title"], p, span');
-              result.push({
-                text: el.textContent.trim(),
-                tableName: nameEl?.textContent?.trim() || 'Unknown',
-                rect: { x: rect.x, y: rect.y, w: rect.width, h: rect.height },
-                containerRect: container ? (() => {
-                  const r = container.getBoundingClientRect();
-                  return { x: r.x, y: r.y, w: r.width, h: r.height };
-                })() : null,
-              });
-            }
-          }
-        }
-        return result;
-      });
-
-      report.tablesScanned = cauElements.length;
-
-      for (const item of cauElements) {
-        const road = classifyRoad(item.text);
-        if (!road) continue;
-        if (isCooldown(item.tableName, cooldownSec)) continue;
-
-        // Screenshot vùng badge hoặc toàn bàn
-        const clipRect = item.containerRect || item.rect;
-        let screenshotB64 = null;
-        try {
-          screenshotB64 = await page.screenshot({
-            encoding: 'base64',
-            clip: {
-              x: Math.max(0, clipRect.x),
-              y: Math.max(0, clipRect.y),
-              width: Math.min(clipRect.w, 400),
-              height: Math.min(clipRect.h, 200),
-            }
-          });
-        } catch {}
-
-        const alert = {
-          tableName: item.tableName,
-          roadType: road.type,
-          label: road.label,
-          text: item.text,
-        };
-        report.alerts.push(alert);
-        setCooldown(item.tableName);
-
-        // Gửi Telegram
-        if (token && chatId) {
-          const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-          const emoji = road.type === '1-1' ? '🔁' : '🔥';
-          const msg = `${emoji} <b>${road.label}</b>\n📍 Bàn: <b>${item.tableName}</b>\n🕐 ${now}`;
-          
-          if (screenshotB64) {
-            await sendPhoto(token, chatId, screenshotB64, msg.replace(/<[^>]+>/g, ''));
-          } else {
-            await sendTelegram(token, chatId, msg);
-          }
-        }
-      }
-    } else {
-      // Xử lý kết quả từ DOM scan
-      report.tablesScanned = tables.length;
-      
-      for (const t of tables) {
-        let roadText = t.text;
-        
-        // Nếu cần, dùng Vision để đọc chính xác hơn
-        if (!roadText && anthropicKey) {
-          const ss = await page.screenshot({
-            encoding: 'base64',
-            clip: { x: t.badgeRect.x, y: t.badgeRect.y, width: t.badgeRect.w, height: t.badgeRect.h }
-          });
-          roadText = await readBadgeText(ss, anthropicKey);
-        }
-
-        const road = classifyRoad(roadText);
-        if (!road) continue;
-        if (isCooldown(t.tableName, cooldownSec)) continue;
-
-        report.alerts.push({ tableName: t.tableName, roadType: road.type, label: roadText });
-        setCooldown(t.tableName);
-
-        if (token && chatId) {
-          const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-          const emoji = road.type === '1-1' ? '🔁' : '🔥';
-          await sendTelegram(token, chatId, `${emoji} <b>${roadText}</b>\n📍 Bàn: <b>${t.tableName}</b>\n🕐 ${now}`);
-        }
-      }
+    if (list.length === 0) {
+      report.errors.push('Không lấy được danh sách bàn. Có thể session hết hạn hoặc endpoint thay đổi.');
     }
 
-    // Gửi tổng kết nếu có alert
-    if (report.alerts.length > 0 && token && chatId) {
+    // 3. Phân tích từng bàn
+    const hotList = [];
+    for (const raw of list) {
+      const { name, history } = parseTable(raw);
+      if (history.length < 4) continue;
+
+      const road = analyzeRoad(history);
+      if (!road) continue;
+
+      hotList.push({
+        tableName: name,
+        roadType: road.type,
+        label: road.label,
+        count: road.count,
+        side: road.side,
+        emoji: road.emoji,
+        results: fmtResults(history),
+        onCooldown: isCooldown(name, cooldownSec),
+      });
+    }
+
+    report.hotTables = hotList;
+
+    // 4. Gửi Telegram (chỉ bàn chưa cooldown)
+    const toAlert = hotList.filter(t => !t.onCooldown);
+
+    if (toAlert.length > 0 && tgToken && tgChatId) {
       const now = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-      const summary = `📊 <b>TỔNG KẾT ${now}</b>\n` +
-        `🔍 Đã quét: ${report.tablesScanned} bàn\n` +
-        `⚡ Cầu hot: ${report.alerts.length} bàn\n\n` +
-        report.alerts.map(a => {
-          const e = a.roadType === '1-1' ? '🔁' : '🔥';
-          return `${e} ${a.tableName}: ${a.label}`;
-        }).join('\n');
-      
-      await sendTelegram(token, chatId, summary);
+
+      // Gửi từng bàn riêng để dễ đọc
+      for (const t of toAlert) {
+        const msg =
+          `${t.emoji} <b>${t.label}</b>\n` +
+          `📍 Bàn: <b>${t.tableName}</b>\n` +
+          `🎴 ${t.results}\n` +
+          `🕐 ${now}`;
+        await sendTelegram(tgToken, tgChatId, msg);
+        setCooldown(t.tableName);
+        report.alertsSent++;
+      }
+
+      // Gửi tổng kết nếu nhiều hơn 1 bàn
+      if (toAlert.length > 1) {
+        const summary =
+          `📊 <b>TỔNG KẾT — ${now}</b>\n` +
+          `🔍 Đã quét: <b>${report.tablesScanned}</b> bàn\n` +
+          `⚡ Cầu hot: <b>${toAlert.length}</b> bàn\n\n` +
+          toAlert.map(t => `${t.emoji} ${t.tableName} — ${t.label}`).join('\n');
+        await sendTelegram(tgToken, tgChatId, summary);
+      }
     }
 
   } catch (e) {
     report.errors.push(e.message);
-  } finally {
-    if (browser) await browser.close();
   }
 
   return res.status(200).json(report);

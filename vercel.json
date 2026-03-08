@@ -2,18 +2,12 @@
   "version": 2,
   "functions": {
     "api/scan.js": {
-      "memory": 1024,
-      "maxDuration": 30
+      "memory": 256,
+      "maxDuration": 15
     }
   },
   "routes": [
-    {
-      "src": "/api/(.*)",
-      "dest": "/api/$1"
-    },
-    {
-      "src": "/(.*)",
-      "dest": "/public/$1"
-    }
+    { "src": "/api/(.*)", "dest": "/api/$1" },
+    { "src": "/(.*)",     "dest": "/public/$1" }
   ]
 }
