@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Baccarat Vision Monitor</title>
+<link href="https://fonts.googleapis.com/css2?family=Teko:wght@400;500;600;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #080c10;
+    --surface: #0e1520;
+    --surface2: #141d2b;
+    --border: #1e2d40;
+    --gold: #f0b429;
+    --gold2: #ffd166;
+    --red: #ef4444;
+    --blue: #3b82f6;
+    --green: #22c55e;
+    --muted: #4a6080;
+    --text: #c8d8e8;
+    --textbright: #eaf3ff;
+  }
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body {
+    font-family: 'Inter', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* BG Grid */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(30,45,64,0.4) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(30,45,64,0.4) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  /* Glow top */
+  body::after {
+    content: '';
+    position: fixed;
+    top: -200px; left: 50%;
+    transform: translateX(-50%);
+    width: 800px; height: 400px;
+    background: radial-gradient(ellipse, rgba(240,180,41,0.08) 0%, transparent 70%);
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrap { position: relative; z-index: 1; }
+
+  /* Header */
+  header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    background: rgba(14,21,32,0.9);
+    backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 100;
+  }
+  .logo {
+    display: flex; align-items: center; gap: 14px;
+  }
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: linear-gradient(135deg, var(--gold), #e67e22);
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem;
+    box-shadow: 0 0 20px rgba(240,180,41,0.3);
+  }
+  .logo-text { font-family: 'Teko', sans-serif; font-size: 1.6rem; letter-spacing: 1px; color: var(--textbright); }
+  .logo-sub { font-size: 0.72rem; color: var(--muted); letter-spacing: 2px; text-transform: uppercase; }
+
+  .status-pill {
+    display: flex; align-items: center; gap: 8px;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 30px;
+    padding: 7px 16px;
+    font-size: 0.8rem;
+  }
+  .dot {
+    width: 8px; height: 8px; border-radius: 50%;
+    background: var(--muted);
+    transition: all 0.3s;
+  }
+  .dot.active { background: var(--green); box-shadow: 0 0 8px var(--green); animation: blink 1.5s infinite; }
+  .dot.scanning { background: var(--gold); box-shadow: 0 0 8px var(--gold); animation: blink 0.6s infinite; }
+  @keyframes blink { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
+  /* Main */
+  main { padding: 30px 32px; max-width: 1300px; margin: 0 auto; }
+
+  /* Config card */
+  .config-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    margin-bottom: 24px;
+  }
+  .section-label {
+    font-family: 'Teko', sans-serif;
+    font-size: 1.1rem;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    color: var(--gold);
+    margin-bottom: 16px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .fg {
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .fg label { font-size: 0.72rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .fg input, .fg select {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--textbright);
+    padding: 10px 14px;
+    border-radius: 8px;
+    font-size: 0.88rem;
+    font-family: 'Inter', sans-serif;
+    transition: border-color 0.2s;
+    outline: none;
+  }
+  .fg input:focus, .fg select:focus { border-color: var(--gold); }
+
+  /* Buttons */
+  .btn-row { display: flex; gap: 10px; margin-top: 18px; flex-wrap: wrap; align-items: center; }
+  .btn {
+    font-family: 'Teko', sans-serif;
+    font-size: 1rem;
+    letter-spacing: 1px;
+    padding: 10px 26px;
+    border-radius: 8px;
+    border: none; cursor: pointer;
+    transition: all 0.2s;
+    text-transform: uppercase;
+  }
+  .btn-go {
+    background: linear-gradient(135deg, var(--gold), #e67e22);
+    color: #000;
+    box-shadow: 0 4px 20px rgba(240,180,41,0.25);
+  }
+  .btn-go:hover { box-shadow: 0 4px 30px rgba(240,180,41,0.5); transform: translateY(-1px); }
+  .btn-go:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+  .btn-stop {
+    background: transparent;
+    border: 1px solid var(--red);
+    color: var(--red);
+  }
+  .btn-stop:hover { background: rgba(239,68,68,0.1); }
+  .btn-stop:disabled { opacity: 0.3; cursor: not-allowed; }
+  .btn-now {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    color: var(--textbright);
+  }
+  .btn-now:hover { border-color: var(--blue); color: var(--blue); }
+
+  .countdown {
+    margin-left: auto;
+    font-family: 'Teko', sans-serif;
+    font-size: 1.4rem;
+    color: var(--muted);
+    letter-spacing: 2px;
+  }
+  .countdown span { color: var(--gold); }
+
+  /* Stats row */
+  .stats-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 18px 20px;
+    display: flex; flex-direction: column; gap: 6px;
+  }
+  .stat-label { font-size: 0.7rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+  .stat-val {
+    font-family: 'Teko', sans-serif;
+    font-size: 2.2rem;
+    line-height: 1;
+    color: var(--textbright);
+  }
+  .stat-val.gold { color: var(--gold); }
+  .stat-val.red { color: var(--red); }
+  .stat-val.blue { color: var(--blue); }
+  .stat-val.green { color: var(--green); }
+
+  /* Main content grid */
+  .content-grid {
+    display: grid;
+    grid-template-columns: 1fr 380px;
+    gap: 20px;
+  }
+
+  /* Alert feed */
+  .feed-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+  }
+  .feed-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .feed-body { max-height: 500px; overflow-y: auto; }
+  .feed-body::-webkit-scrollbar { width: 4px; }
+  .feed-body::-webkit-scrollbar-track { background: transparent; }
+  .feed-body::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+  .feed-empty {
+    padding: 60px 20px;
+    text-align: center;
+    color: var(--muted);
+  }
+  .feed-empty .big { font-size: 3rem; margin-bottom: 10px; }
+  .feed-empty p { font-size: 0.85rem; line-height: 1.6; }
+
+  .alert-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    animation: slideIn 0.3s ease;
+    transition: background 0.2s;
+  }
+  .alert-item:hover { background: var(--surface2); }
+  .alert-item:last-child { border-bottom: none; }
+  @keyframes slideIn { from { transform: translateX(-10px); opacity: 0; } to { transform: none; opacity: 1; } }
+
+  .alert-icon {
+    width: 40px; height: 40px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.3rem; flex-shrink: 0;
+  }
+  .alert-icon.r11 { background: rgba(59,130,246,0.15); border: 1px solid rgba(59,130,246,0.3); }
+  .alert-icon.rbet { background: rgba(239,68,68,0.15); border: 1px solid rgba(239,68,68,0.3); }
+
+  .alert-info { flex: 1; min-width: 0; }
+  .alert-table { font-weight: 600; font-size: 0.9rem; color: var(--textbright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .alert-label {
+    display: inline-block;
+    background: rgba(240,180,41,0.15);
+    border: 1px solid rgba(240,180,41,0.3);
+    color: var(--gold);
+    font-size: 0.72rem;
+    font-weight: 600;
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-top: 4px;
+    letter-spacing: 0.5px;
+  }
+  .alert-time { font-size: 0.72rem; color: var(--muted); flex-shrink: 0; }
+
+  /* Log */
+  .log-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  .log-head {
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border);
+  }
+  .log-body {
+    flex: 1;
+    padding: 14px;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+    font-size: 0.75rem;
+    line-height: 1.8;
+    max-height: 420px;
+    overflow-y: auto;
+    background: var(--bg);
+  }
+  .log-body::-webkit-scrollbar { width: 3px; }
+  .log-body::-webkit-scrollbar-thumb { background: var(--border); }
+  .log-line { display: block; }
+  .log-line.ok { color: #22c55e; }
+  .log-line.err { color: #ef4444; }
+  .log-line.info { color: #60a5fa; }
+  .log-line.warn { color: var(--gold); }
+  .log-line.dim { color: var(--muted); }
+
+  /* Progress bar */
+  .progress-wrap {
+    height: 2px;
+    background: var(--border);
+    overflow: hidden;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold), #e67e22);
+    width: 0%;
+    transition: width 1s linear;
+  }
+
+  @media (max-width: 900px) {
+    .content-grid { grid-template-columns: 1fr; }
+    .stats-row { grid-template-columns: repeat(2, 1fr); }
+    header { padding: 14px 16px; }
+    main { padding: 16px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">🎴</div>
+    <div>
+      <div class="logo-text">BACCARAT VISION</div>
+      <div class="logo-sub">Road Monitor — AI Powered</div>
+    </div>
+  </div>
+  <div class="status-pill">
+    <div class="dot" id="dot"></div>
+    <span id="statusTxt">Chờ lệnh</span>
+  </div>
+</header>
+
+<!-- Progress bar -->
+<div class="progress-wrap"><div class="progress-bar" id="progressBar"></div></div>
+
+<main>
+
+  <!-- Config -->
+  <div class="config-card">
+    <div class="section-label">⚙ Cấu hình</div>
+    <div class="form-grid">
+      <div class="fg">
+        <label>Telegram Bot Token</label>
+        <input type="password" id="cfgToken" placeholder="1234567890:ABCdef...">
+      </div>
+      <div class="fg">
+        <label>Chat ID</label>
+        <input type="text" id="cfgChatId" placeholder="-100xxxxxxxxxx">
+      </div>
+      <div class="fg">
+        <label>Tần suất quét</label>
+        <select id="cfgInterval">
+          <option value="15000">⚡ 15 giây</option>
+          <option value="30000">30 giây</option>
+          <option value="60000" selected>1 phút</option>
+        </select>
+      </div>
+      <div class="fg">
+        <label>Cooldown alert (giây)</label>
+        <input type="number" id="cfgCooldown" value="120" min="30" max="600">
+      </div>
+    </div>
+    <div class="btn-row">
+      <button class="btn btn-go" id="btnStart" onclick="startBot()">▶ Bắt đầu</button>
+      <button class="btn btn-stop" id="btnStop" onclick="stopBot()" disabled>⏹ Dừng</button>
+      <button class="btn btn-now" onclick="runScan()">🔄 Quét ngay</button>
+      <div class="countdown" id="cdText"></div>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats-row">
+    <div class="stat">
+      <div class="stat-label">Lần quét</div>
+      <div class="stat-val gold" id="sScans">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Bàn đã quét</div>
+      <div class="stat-val" id="sTables">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Cầu 1-1</div>
+      <div class="stat-val blue" id="s11">0</div>
+    </div>
+    <div class="stat">
+      <div class="stat-label">Cầu Bệt</div>
+      <div class="stat-val red" id="sBet">0</div>
+    </div>
+  </div>
+
+  <!-- Content -->
+  <div class="content-grid">
+    <!-- Alert feed -->
+    <div class="feed-card">
+      <div class="feed-head">
+        <div class="section-label" style="margin:0">⚡ CẦU HOT PHÁT HIỆN</div>
+        <button onclick="clearAlerts()" style="background:transparent;border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;cursor:pointer;font-size:0.75rem;">Xóa</button>
+      </div>
+      <div class="feed-body" id="feedBody">
+        <div class="feed-empty">
+          <div class="big">🎯</div>
+          <p>Chưa có dữ liệu.<br>Nhấn <b>Bắt đầu</b> để theo dõi tự động.<br>Bot sẽ quét và báo cầu 1-1 hoặc bệt.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Log -->
+    <div class="log-card">
+      <div class="log-head">
+        <div class="section-label" style="margin:0">📋 NHẬT KÝ</div>
+      </div>
+      <div class="log-body" id="logBody">
+        <span class="log-line info">[SYS] Sẵn sàng. Điền cấu hình và bấm Bắt đầu.</span>
+      </div>
+    </div>
+  </div>
+
+</main>
+</div>
+
+<script>
+let intervalId = null, cdId = null;
+let cdLeft = 0;
+let s = { scans: 0, tables: 0, r11: 0, rBet: 0 };
+let allAlerts = [];
+
+// ── Config ─────────────────────────────
+function loadCfg() {
+  try {
+    const c = JSON.parse(localStorage.getItem('bvCfg') || '{}');
+    if (c.token) document.getElementById('cfgToken').value = c.token;
+    if (c.chatId) document.getElementById('cfgChatId').value = c.chatId;
+    if (c.cooldown) document.getElementById('cfgCooldown').value = c.cooldown;
+    if (c.interval) document.getElementById('cfgInterval').value = c.interval;
+  } catch {}
+}
+function saveCfg() {
+  localStorage.setItem('bvCfg', JSON.stringify({
+    token: document.getElementById('cfgToken').value,
+    chatId: document.getElementById('cfgChatId').value,
+    cooldown: document.getElementById('cfgCooldown').value,
+    interval: document.getElementById('cfgInterval').value,
+  }));
+}
+function getCfg() {
+  return {
+    token: document.getElementById('cfgToken').value.trim(),
+    chatId: document.getElementById('cfgChatId').value.trim(),
+    cooldown: document.getElementById('cfgCooldown').value,
+    interval: parseInt(document.getElementById('cfgInterval').value),
+  };
+}
+
+// ── Log ────────────────────────────────
+function log(msg, type='dim') {
+  const box = document.getElementById('logBody');
+  const t = new Date().toLocaleTimeString('vi-VN');
+  const el = document.createElement('span');
+  el.className = `log-line ${type}`;
+  el.textContent = `[${t}] ${msg}`;
+  box.appendChild(document.createTextNode('\n'));
+  box.appendChild(el);
+  box.scrollTop = box.scrollHeight;
+}
+
+// ── Stats ──────────────────────────────
+function updateStats() {
+  document.getElementById('sScans').textContent = s.scans;
+  document.getElementById('sTables').textContent = s.tables;
+  document.getElementById('s11').textContent = s.r11;
+  document.getElementById('sBet').textContent = s.rBet;
+}
+
+// ── Feed ───────────────────────────────
+function addAlertItem(a) {
+  allAlerts.unshift(a);
+  const feed = document.getElementById('feedBody');
+  
+  // Remove empty state
+  const empty = feed.querySelector('.feed-empty');
+  if (empty) empty.remove();
+
+  const cls = a.roadType === '1-1' ? 'r11' : 'rbet';
+  const emoji = a.roadType === '1-1' ? '🔁' : '🔥';
+  const time = new Date().toLocaleTimeString('vi-VN');
+
+  const el = document.createElement('div');
+  el.className = 'alert-item';
+  el.innerHTML = `
+    <div class="alert-icon ${cls}">${emoji}</div>
+    <div class="alert-info">
+      <div class="alert-table">${a.tableName}</div>
+      <div class="alert-label">${a.label || a.text || a.roadType}</div>
+    </div>
+    <div class="alert-time">${time}</div>
+  `;
+  feed.insertBefore(el, feed.firstChild);
+
+  // Max 50 items
+  while (feed.children.length > 50) feed.removeChild(feed.lastChild);
+}
+
+function clearAlerts() {
+  allAlerts = [];
+  document.getElementById('feedBody').innerHTML = `
+    <div class="feed-empty">
+      <div class="big">🗑️</div>
+      <p>Đã xóa. Bot vẫn đang chạy.</p>
+    </div>`;
+}
+
+// ── Status UI ─────────────────────────
+function setStatus(state) {
+  const dot = document.getElementById('dot');
+  const txt = document.getElementById('statusTxt');
+  dot.className = 'dot ' + (state === 'running' ? 'active' : state === 'scanning' ? 'scanning' : '');
+  txt.textContent = state === 'running' ? 'Đang chạy' : state === 'scanning' ? 'Đang quét...' : 'Đã dừng';
+}
+
+// ── Progress countdown ─────────────────
+function startCountdown(sec) {
+  clearInterval(cdId);
+  cdLeft = sec;
+  const bar = document.getElementById('progressBar');
+  const cdTxt = document.getElementById('cdText');
+  bar.style.transition = 'none';
+  bar.style.width = '100%';
+  setTimeout(() => {
+    bar.style.transition = `width ${sec}s linear`;
+    bar.style.width = '0%';
+  }, 50);
+
+  cdId = setInterval(() => {
+    cdLeft--;
+    cdTxt.innerHTML = `Quét tiếp: <span>${cdLeft}s</span>`;
+    if (cdLeft <= 0) {
+      clearInterval(cdId);
+      cdTxt.innerHTML = '';
+    }
+  }, 1000);
+}
+
+// ── API call ───────────────────────────
+async function runScan() {
+  const cfg = getCfg();
+  saveCfg();
+  setStatus('scanning');
+  log('Bắt đầu quét...', 'info');
+
+  try {
+    const params = new URLSearchParams({
+      token: cfg.token,
+      chatId: cfg.chatId,
+      cooldown: cfg.cooldown,
+    });
+    const res = await fetch(`/api/scan?${params}`);
+    const data = await res.json();
+
+    s.scans++;
+    s.tables = Math.max(s.tables, data.tablesScanned || 0);
+    
+    const alerts = data.alerts || [];
+    const new11 = alerts.filter(a => a.roadType === '1-1').length;
+    const newBet = alerts.filter(a => a.roadType === 'bet').length;
+    s.r11 += new11;
+    s.rBet += newBet;
+    updateStats();
+
+    if (alerts.length > 0) {
+      log(`✅ Tìm thấy ${alerts.length} cầu hot! (1-1: ${new11}, Bệt: ${newBet})`, 'ok');
+      alerts.forEach(a => addAlertItem(a));
+    } else {
+      log(`Đã quét ${data.tablesScanned || 0} bàn — Chưa có cầu hot`, 'dim');
+    }
+
+    if (data.errors?.length) {
+      data.errors.forEach(e => log(`⚠ ${e}`, 'err'));
+    }
+
+  } catch(e) {
+    log(`Lỗi: ${e.message}`, 'err');
+  }
+
+  setStatus(intervalId ? 'running' : '');
+}
+
+// ── Bot control ────────────────────────
+function startBot() {
+  const cfg = getCfg();
+  if (!cfg.token || !cfg.chatId) {
+    log('⚠ Chưa điền Bot Token hoặc Chat ID!', 'warn');
+    return;
+  }
+  
+  document.getElementById('btnStart').disabled = true;
+  document.getElementById('btnStop').disabled = false;
+  setStatus('running');
+  log(`Bot bắt đầu — quét mỗi ${cfg.interval/1000}s`, 'ok');
+
+  runScan();
+  startCountdown(cfg.interval / 1000);
+
+  intervalId = setInterval(() => {
+    runScan();
+    startCountdown(cfg.interval / 1000);
+  }, cfg.interval);
+}
+
+function stopBot() {
+  clearInterval(intervalId);
+  clearInterval(cdId);
+  intervalId = null;
+  document.getElementById('btnStart').disabled = false;
+  document.getElementById('btnStop').disabled = true;
+  document.getElementById('progressBar').style.width = '0%';
+  document.getElementById('cdText').textContent = '';
+  setStatus('');
+  log('Bot đã dừng.', 'warn');
+}
+
+loadCfg();
+</script>
+</body>
+</html>

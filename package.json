@@ -1,0 +1,10 @@
+{
+  "name": "baccarat-vision-monitor",
+  "version": "2.0.0",
+  "description": "Baccarat road monitor - Screenshot + AI Vision badge detection",
+  "engines": { "node": ">=18" },
+  "dependencies": {
+    "@sparticuz/chromium": "^123.0.0",
+    "puppeteer-core": "^22.0.0"
+  }
+}
