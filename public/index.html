@@ -351,6 +351,23 @@
 
 <main>
 
+
+  <!-- ══ LINK LOGIN ══ -->
+  <div class="config-card" style="border-color:rgba(240,180,41,0.4); margin-bottom:16px;">
+    <div class="section-label" style="color:var(--gold)">🔗 Link Login Game <span style="font-family:Inter;font-size:0.7rem;color:var(--muted);letter-spacing:0;font-weight:400;text-transform:none">— dán link mỗi khi session hết hạn</span></div>
+    <div class="fg">
+      <label>URL Đăng nhập <span style="color:#ef4444">*</span></label>
+      <textarea id="cfgLoginUrl" rows="3"
+        style="width:100%;background:var(--surface2);border:1px solid var(--border);color:var(--bright);padding:10px 12px;border-radius:8px;font-size:0.75rem;font-family:monospace;resize:vertical;outline:none;line-height:1.5;"
+        placeholder="https://bpweb.grteud.com/api/player/MexAWS081/login?user=...&key=..."></textarea>
+      <div id="urlStatus" style="display:none;margin-top:6px;padding:6px 10px;border-radius:6px;font-size:0.7rem;"></div>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap;">
+      <button class="btn btn-go" onclick="saveLoginUrl()" style="font-size:0.85rem;padding:8px 18px;">💾 Lưu link</button>
+      <button class="btn btn-secondary" onclick="clearLoginUrl()" style="font-size:0.85rem;padding:8px 14px;border-color:#ef4444;color:#ef4444;">🗑 Xóa</button>
+    </div>
+  </div>
+
   <!-- Config -->
   <div class="config-card">
     <div class="section-label">⚙ Cấu hình</div>
@@ -444,6 +461,7 @@ let allAlerts = [];
 function loadCfg() {
   try {
     const c = JSON.parse(localStorage.getItem('bvCfg') || '{}');
+    if (c.loginUrl) { document.getElementById('cfgLoginUrl').value = c.loginUrl; updateUrlStatus(c.loginUrl); }
     if (c.token) document.getElementById('cfgToken').value = c.token;
     if (c.chatId) document.getElementById('cfgChatId').value = c.chatId;
     if (c.cooldown) document.getElementById('cfgCooldown').value = c.cooldown;
@@ -452,6 +470,7 @@ function loadCfg() {
 }
 function saveCfg() {
   localStorage.setItem('bvCfg', JSON.stringify({
+    loginUrl: document.getElementById('cfgLoginUrl').value,
     token: document.getElementById('cfgToken').value,
     chatId: document.getElementById('cfgChatId').value,
     cooldown: document.getElementById('cfgCooldown').value,
@@ -460,6 +479,7 @@ function saveCfg() {
 }
 function getCfg() {
   return {
+    loginUrl: document.getElementById('cfgLoginUrl').value.trim(),
     token: document.getElementById('cfgToken').value.trim(),
     chatId: document.getElementById('cfgChatId').value.trim(),
     cooldown: document.getElementById('cfgCooldown').value,
@@ -618,8 +638,13 @@ async function runScan() {
 // ── Bot control ────────────────────────
 function startBot() {
   const cfg = getCfg();
+  if (!cfg.loginUrl) {
+    log('⚠ Vui lòng dán link login trước!', 'warn');
+    document.getElementById('cfgLoginUrl').focus();
+    return;
+  }
   if (!cfg.token || !cfg.chatId) {
-    log('⚠ Chưa điền Bot Token hoặc Chat ID!', 'warn');
+    log('⚠ Chưa điền Telegram Bot Token hoặc Chat ID!', 'warn');
     return;
   }
   
@@ -648,6 +673,50 @@ function stopBot() {
   setStatus('');
   log('Bot đã dừng.', 'warn');
 }
+
+
+// ── Login URL helpers ─────────────────────────────────────
+function saveLoginUrl() {
+  const url = document.getElementById('cfgLoginUrl').value.trim();
+  if (!url) { log('⚠ Chưa nhập URL!', 'warn'); return; }
+  saveCfg();
+  updateUrlStatus(url);
+  log('✅ Đã lưu link login.', 'ok');
+}
+
+function clearLoginUrl() {
+  document.getElementById('cfgLoginUrl').value = '';
+  const s = document.getElementById('urlStatus');
+  s.style.display = 'none';
+  saveCfg();
+  log('🗑 Đã xóa link login.', 'warn');
+}
+
+function updateUrlStatus(url) {
+  const el = document.getElementById('urlStatus');
+  if (!url) { el.style.display = 'none'; return; }
+  try {
+    const u = new URL(url);
+    const user = u.searchParams.get('user') || u.searchParams.get('userName') || '?';
+    el.style.display = 'block';
+    el.style.background = 'rgba(34,197,94,0.1)';
+    el.style.border = '1px solid rgba(34,197,94,0.3)';
+    el.style.color = '#86efac';
+    el.textContent = '✅  Host: ' + u.hostname + '  |  User: ' + user + '  |  ' + url.length + ' ký tự';
+  } catch {
+    el.style.display = 'block';
+    el.style.background = 'rgba(239,68,68,0.1)';
+    el.style.border = '1px solid rgba(239,68,68,0.3)';
+    el.style.color = '#fca5a5';
+    el.textContent = '❌  URL không hợp lệ — kiểm tra lại';
+  }
+}
+
+// Preview realtime
+document.addEventListener('DOMContentLoaded', () => {
+  const el = document.getElementById('cfgLoginUrl');
+  if (el) el.addEventListener('input', function() { updateUrlStatus(this.value.trim()); });
+});
 
 loadCfg();
 </script>
