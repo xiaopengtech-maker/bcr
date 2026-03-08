@@ -5,8 +5,7 @@
  * ✅ Gọi thẳng API platform bằng fetch
  */
 
-const LOGIN_URL = `https://bpweb.grteud.com/api/player/MexAWS081/login?user=f572868agent190563002&key=2YUbKDU3UtQoIKq%2FO6oOLOCYQLfXNdQj1p023AxRBEduc7zOQXHKsOPF%2BkMellAC&language=vn&showSymbol=true&balance=0.000&dm=1&cafeid=wg2868&reverseBPColor=false&allowHedgeBetting=false&isInternal=0&extension2=f57&extension3=sc88.com&loginIp=42.114.185.31&sgt=1&userName=2868agent190563002`;
-
+const LOGIN_URL = `ufd.intplaynet.com/player/login/apiLogin0?agentId=wg2868&x=9Dm_ncBZSZANbiKbdZh1NtmVDU0f_rbVJwSsknGcT6p59LrwkJeuesl51Gt8Q9XSQNh23Jz1UaWbP9tRNNe1x13y8lb7yFbhgwBVZK9Kw1_UggHBreI0_Xb-3XRshvByXzH6QG4ZYwTqFbWsPNw0KfTMV7or0YqDMtuJjWsz7r_3ItqO8jYvuAZjrLG4lqhvsEVNB9o89Hxjeyq30m-Y2GTHygk3m6xxo2JnzEzBfsTnvLHzu0BUH6Hs-jUmmii7XilWiNVm3OT1DX-tC5yQ7FrHUOgJ7PRueJzvqRMMuyXwe9Wi1oy_Lu-Hg_CZCMcxqTEkfVvgmvbv7_YradU3gtHOgDZzRK9PnRpG8c54ek8mjLNIrebC05CHBrcMOG2iexj2Xiy2xyrAw2GUrNWxbSQDNbi_-ugdk3O3o1wC16o'
 const BASE = 'https://bpweb.grteud.com';
 const TG   = 'https://api.telegram.org/bot';
 
